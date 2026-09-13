@@ -1,0 +1,3 @@
+tokenizer: gpt2
+seq_len: 256
+text_key: text
