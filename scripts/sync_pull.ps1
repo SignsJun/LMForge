@@ -7,9 +7,14 @@ try {
         throw "Local changes detected. Commit or stash them before pulling."
     }
 
-    git pull --rebase origin main
+    git fetch origin main
     if ($LASTEXITCODE -ne 0) {
-        throw "git pull --rebase failed"
+        throw "git fetch failed"
+    }
+
+    git rebase origin/main
+    if ($LASTEXITCODE -ne 0) {
+        throw "git rebase failed"
     }
 
     Write-Output "Code is synchronized."

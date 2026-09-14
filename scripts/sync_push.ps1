@@ -1,5 +1,5 @@
 param(
-    [string]$Message = "Sync LMForge code and model"
+    [string]$Message = "Sync LMForge code"
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,9 +19,14 @@ try {
         }
     }
 
-    git pull --rebase origin main
+    git fetch origin main
     if ($LASTEXITCODE -ne 0) {
-        throw "git pull --rebase failed; resolve the conflict before pushing"
+        throw "git fetch failed"
+    }
+
+    git rebase origin/main
+    if ($LASTEXITCODE -ne 0) {
+        throw "git rebase failed; resolve the conflict before pushing"
     }
 
     git push origin main
