@@ -1,0 +1,3 @@
+tokenizer: Qwen/Qwen2.5-0.5B
+seq_len: 512
+text_key: text

@@ -23,6 +23,9 @@ def main():
     parser.add_argument("--train", default="configs/train/pretrain.yaml")
     parser.add_argument("--data-path", default=None)
     parser.add_argument("--resume", default=None)
+    parser.add_argument("--max-steps", type=int, default=None)
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--require-cuda", action="store_true")
     args = parser.parse_args()
 
     train_cfg = TrainConfig.from_yaml(args.train)
@@ -30,11 +33,19 @@ def main():
         train_cfg.data_path = args.data_path
     if args.resume:
         train_cfg.resume = args.resume
+    if args.max_steps is not None:
+        train_cfg.max_steps = args.max_steps
+    if args.output_dir:
+        train_cfg.output_dir = args.output_dir
 
     with open(args.data) as f:
         data_cfg = yaml.safe_load(f)
 
     device = init_distributed()
+    if args.require_cuda and device.type != "cuda":
+        raise RuntimeError(
+            "CUDA is required for this run, but PyTorch could not initialize a CUDA device"
+        )
     set_seed(train_cfg.seed + get_rank())
 
     model_cfg = ModelConfig.from_yaml(args.model)
