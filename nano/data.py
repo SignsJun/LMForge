@@ -46,6 +46,62 @@ def _iter_jsonl(path: Path, text_key: str) -> Iterator[str]:
                     yield text
 
 
+def encode_sft_sample(
+    tokenizer: Tokenizer,
+    conversations: list[dict],
+    seq_len: int,
+) -> dict[str, torch.Tensor]:
+    pad_id = tokenizer.pad_token_id
+    eos_id = tokenizer.eos_token_id
+    input_ids: list[int] = []
+    labels: list[int] = []
+
+    for i, msg in enumerate(conversations):
+        # mask 掉user 或者 system 的 content，他们仅用作prompt，不进行loss 计算
+        role = msg.get("role", "")
+        content = msg.get("content") or ""
+        if role == "system":
+            ids = tokenizer.encode(f"System: {content}\n")
+            input_ids += ids
+            labels += [-100] * len(ids)
+            continue
+        if role == "user":
+            ids = tokenizer.encode(f"User: {content}\n")
+            input_ids += ids
+            labels += [-100] * len(ids)
+            continue
+        if role != "assistant":
+            continue
+
+        header_ids = tokenizer.encode("Assistant:")
+        body_ids = tokenizer.encode(f" {content}") if content else []
+        turn_ids = header_ids + body_ids + [eos_id]
+        turn_labels = [-100] * len(header_ids) + body_ids + [eos_id]
+        # 如果这不是最后一个 turn，则添加一个换行符，并 mask 掉
+        if i != len(conversations) - 1:
+            nl = tokenizer.encode("\n")
+            turn_ids += nl
+            turn_labels += [-100] * len(nl)
+        input_ids += turn_ids
+        labels += turn_labels
+
+    # 截断到 seq_len
+    input_ids = input_ids[:seq_len]
+    labels = labels[:seq_len]
+    attn = [1] * len(input_ids)
+    pad_n = seq_len - len(input_ids)
+    # 如果长度不够，则添加右 padding，并 mask 掉
+    if pad_n:
+        input_ids += [pad_id] * pad_n
+        labels += [-100] * pad_n
+        attn += [0] * pad_n
+    return {
+        "input_ids": torch.tensor(input_ids, dtype=torch.long),
+        "labels": torch.tensor(labels, dtype=torch.long),
+        "attention_mask": torch.tensor(attn, dtype=torch.long),
+    }
+
+
 class CausalJsonlDataset(IterableDataset):
     def __init__(self, path: str | Path, tokenizer: Tokenizer, seq_len: int, text_key: str = "text"):
         self.path = Path(path)
@@ -83,6 +139,35 @@ class CausalJsonlDataset(IterableDataset):
                 buf = buf[seq_len:]
         if buf:
             yield flush(buf)
+
+
+def _iter_sft_jsonl(path: Path) -> Iterator[list[dict]]:
+    # 先排列好所有文件，然后按顺序读取
+    files = sorted(path.glob("*.jsonl")) if path.is_dir() else [path]
+    for file in files:
+        with open(file, encoding="utf-8") as f:
+            for line in f:
+                # 去除空格和换行符
+                line = line.strip()
+                if not line:
+                    continue
+                obj = json.loads(line)
+                conv = obj.get("conversations") or obj.get("messages")
+                if conv:
+                    yield conv
+
+
+class SFTJsonlDataset(IterableDataset):
+    def __init__(self, path: str | Path, tokenizer: Tokenizer, seq_len: int):
+        self.path = Path(path)
+        self.tokenizer = tokenizer
+        self.seq_len = seq_len
+
+    def __iter__(self):
+        for conv in _iter_sft_jsonl(self.path):
+            sample = encode_sft_sample(self.tokenizer, conv, self.seq_len)
+            if (sample["labels"] != -100).any():
+                yield sample
 
 
 def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:

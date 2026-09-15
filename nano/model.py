@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from .cache import KVCache
 from .config import NanoConfig
 from .decoder import LlamaDecoderLayer
+from .mask import create_causal_mask
 from .rmsnorm import LlamaRMSNorm
 from .rope import LlamaRotaryEmbedding
 
@@ -38,6 +39,7 @@ class LlamaForCausalLM(nn.Module):
         input_ids: torch.Tensor,
         position_ids: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
+        document_ids: torch.Tensor | None = None,
         cache: KVCache | None = None,
         use_cache: bool = False,
         labels: torch.Tensor | None = None,
@@ -46,21 +48,20 @@ class LlamaForCausalLM(nn.Module):
         if use_cache and cache is None:
             cache = KVCache()
         past_seen_tokens = 0 if cache is None else cache.get_seq_length()
+        cache_position = torch.arange(
+            past_seen_tokens, past_seen_tokens + q_len, device=input_ids.device
+        )
         if position_ids is None:
-            position_ids = torch.arange(
-                past_seen_tokens, past_seen_tokens + q_len, device=input_ids.device
-            ).unsqueeze(0).expand(bsz, -1)
-        if (
-            attention_mask is not None
-            and attention_mask.dim() == 2
-            and attention_mask.size(1) == q_len
-            and past_seen_tokens
-        ):
-            attention_mask = torch.cat(
-                [attention_mask.new_ones(bsz, past_seen_tokens), attention_mask], dim=1
-            )
+            position_ids = cache_position.unsqueeze(0).expand(bsz, -1)
 
         hidden_states = self.embed_tokens(input_ids)
+        attention_mask = create_causal_mask(
+            attention_mask,
+            hidden_states,
+            cache_position,
+            past_seen_tokens + q_len,
+            document_ids,
+        )
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
         for decoder_layer in self.layers:
             hidden_states = decoder_layer(
