@@ -25,6 +25,10 @@ class TrainConfig:
     seed: int = 42
     num_workers: int = 2
     resume: str | None = None
+    base_ckpt: str | None = None
+    lora: bool = False
+    lora_r: int = 8
+    lora_alpha: float = 16.0
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "TrainConfig":

@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 import yaml
 
 from lmforge.data import SFTJsonlDataset, Tokenizer, collate_packed
+from lmforge.lora import inject_lora, load_base_weights, lora_param_stats
 from lmforge.models import LlamaForCausalLM, ModelConfig
 from lmforge.trainer import TrainConfig, Trainer
 from lmforge.utils import (
@@ -11,6 +12,7 @@ from lmforge.utils import (
     get_rank,
     get_world_size,
     init_distributed,
+    is_main,
     set_seed,
     wrap_ddp,
 )
@@ -26,6 +28,10 @@ def main():
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--require-cuda", action="store_true")
+    parser.add_argument("--lora", action="store_true")
+    parser.add_argument("--lora-r", type=int, default=None)
+    parser.add_argument("--lora-alpha", type=float, default=None)
+    parser.add_argument("--base-ckpt", default=None)
     args = parser.parse_args()
 
     train_cfg = TrainConfig.from_yaml(args.train)
@@ -37,6 +43,19 @@ def main():
         train_cfg.max_steps = args.max_steps
     if args.output_dir:
         train_cfg.output_dir = args.output_dir
+    if args.lora:
+        train_cfg.lora = True
+    if args.lora_r is not None:
+        train_cfg.lora_r = args.lora_r
+    if args.lora_alpha is not None:
+        train_cfg.lora_alpha = args.lora_alpha
+    if args.base_ckpt:
+        train_cfg.base_ckpt = args.base_ckpt
+    if train_cfg.lora:
+        if train_cfg.lr == 1.0e-5:
+            train_cfg.lr = 1.0e-4
+        if train_cfg.min_lr == 1.0e-6:
+            train_cfg.min_lr = 1.0e-5
 
     with open(args.data) as f:
         data_cfg = yaml.safe_load(f)
@@ -55,7 +74,15 @@ def main():
             f"tokenizer vocab {tokenizer.vocab_size} > model vocab {model_cfg.vocab_size}"
         )
 
-    model = wrap_ddp(LlamaForCausalLM(model_cfg).to(device), device)
+    model = LlamaForCausalLM(model_cfg)
+    if train_cfg.base_ckpt:
+        load_base_weights(model, train_cfg.base_ckpt)
+    if train_cfg.lora:
+        inject_lora(model, r=train_cfg.lora_r, alpha=train_cfg.lora_alpha)
+        trainable, total = lora_param_stats(model)
+        if is_main():
+            print(f"lora trainable {trainable}/{total} ({100 * trainable / total:.2f}%)", flush=True)
+    model = wrap_ddp(model.to(device), device)
     dataset = SFTJsonlDataset(
         train_cfg.data_path,
         tokenizer,

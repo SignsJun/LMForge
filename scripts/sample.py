@@ -3,6 +3,7 @@ import argparse
 import torch
 
 from lmforge.data import Tokenizer
+from lmforge.lora import has_lora_state, inject_lora
 from lmforge.models import LlamaForCausalLM, ModelConfig
 
 
@@ -23,9 +24,16 @@ def main():
     else:
         device = torch.device("cpu")
 
-    model = LlamaForCausalLM(ModelConfig.from_yaml(args.model)).to(device)
+    model = LlamaForCausalLM(ModelConfig.from_yaml(args.model))
     ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
-    model.load_state_dict(ckpt["model"])
+    state = ckpt["model"]
+    lora_cfg = ckpt.get("lora")
+    if lora_cfg or has_lora_state(state):
+        r = lora_cfg["r"] if lora_cfg else 8
+        alpha = lora_cfg["alpha"] if lora_cfg else 16.0
+        inject_lora(model, r=r, alpha=alpha)
+    model.load_state_dict(state)
+    model = model.to(device)
     model.eval()
     tokenizer = Tokenizer(args.tokenizer)
     ids = tokenizer.encode(args.prompt)

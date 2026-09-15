@@ -68,6 +68,12 @@ class Trainer:
             fused=self.device.type == "cuda",
         )
 
+    def _ckpt_extra(self) -> dict:
+        cfg = self.config
+        if not cfg.lora:
+            return {"lora": None}
+        return {"lora": {"r": cfg.lora_r, "alpha": cfg.lora_alpha}}
+
     def _batches(self):
         while True:
             for batch in self.dataloader:
@@ -134,6 +140,7 @@ class Trainer:
                     self.optimizer,
                     self.scheduler,
                     self.step,
+                    extra=self._ckpt_extra(),
                 )
             if self.step >= cfg.max_steps:
                 break
@@ -144,4 +151,5 @@ class Trainer:
             self.optimizer,
             self.scheduler,
             self.step,
+            extra=self._ckpt_extra(),
         )

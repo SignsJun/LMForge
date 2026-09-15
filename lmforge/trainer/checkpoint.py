@@ -11,21 +11,20 @@ def save_checkpoint(
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
     step: int,
+    extra: dict | None = None,
 ) -> None:
-    # 只 rank0 写盘，然后 barrier，防止其它 rank 先去读未写完的文件
     if is_main():
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(
-            {
-                # DDP 包了一层 module，存裸模型才能单卡 load
-                "model": unwrap(model).state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "scheduler": scheduler.state_dict(),
-                "step": step,
-            },
-            path,
-        )
+        payload = {
+            "model": unwrap(model).state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "step": step,
+        }
+        if extra:
+            payload.update(extra)
+        torch.save(payload, path)
     barrier()
 
 
