@@ -4,6 +4,7 @@ import torch
 
 from .config import NanoConfig
 from .data import Tokenizer
+from .lora import inject_lora, has_lora_state
 from .model import LlamaForCausalLM
 from .trainer import get_device
 
@@ -45,9 +46,16 @@ def main():
     tokenizer = Tokenizer(args.tokenizer)
     config = NanoConfig()
     config.vocab_size = max(config.vocab_size, tokenizer.vocab_size)
-    model = LlamaForCausalLM(config).to(device)
+    model = LlamaForCausalLM(config)
     ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
-    model.load_state_dict(ckpt["model"])
+    state = ckpt["model"]
+    lora_cfg = ckpt.get("lora")
+    if lora_cfg or has_lora_state(state):
+        r = lora_cfg["r"] if lora_cfg else 8
+        alpha = lora_cfg["alpha"] if lora_cfg else 16.0
+        inject_lora(model, r=r, alpha=alpha)
+    model.load_state_dict(state)
+    model = model.to(device)
     model.eval()
 
     messages: list[tuple[str, str]] = []

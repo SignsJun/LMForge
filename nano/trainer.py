@@ -33,6 +33,10 @@ class TrainConfig:
     seed: int = 42
     num_workers: int = 0
     resume_from_checkpoint: str | None = None
+    base_ckpt: str | None = None
+    lora: bool = False
+    lora_r: int = 8
+    lora_alpha: float = 16.0
 
 
 def get_device() -> torch.device:
@@ -50,9 +54,12 @@ def set_seed(seed: int) -> None:
 
 
 def build_scheduler(optimizer: AdamW, cfg: TrainConfig) -> LambdaLR:
+    # 学习率衰减策略
     def lr_lambda(step: int) -> float:
+        # 预热阶段
         if step < cfg.warmup_steps:
             return max(step, 1) / max(cfg.warmup_steps, 1)
+        # 衰减阶段
         progress = (step - cfg.warmup_steps) / max(cfg.max_steps - cfg.warmup_steps, 1)
         progress = min(progress, 1.0)
         coeff = 0.5 * (1.0 + math.cos(math.pi * progress))
@@ -108,6 +115,11 @@ class Trainer:
                 "optimizer": self.optimizer.state_dict(),
                 "lr_scheduler": self.lr_scheduler.state_dict(),
                 "global_step": self.global_step,
+                "lora": (
+                    {"r": self.args.lora_r, "alpha": self.args.lora_alpha}
+                    if self.args.lora
+                    else None
+                ),
             },
             path,
         )
