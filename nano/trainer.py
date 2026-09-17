@@ -37,6 +37,11 @@ class TrainConfig:
     lora: bool = False
     lora_r: int = 8
     lora_alpha: float = 16.0
+    group_size: int = 4
+    max_new_tokens: int = 64
+    temperature: float = 0.8
+    clip_eps: float = 0.2
+    beta: float = 0.04
 
 
 def get_device() -> torch.device:

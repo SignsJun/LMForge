@@ -89,20 +89,38 @@ class LlamaForCausalLM(nn.Module):
         max_new_tokens: int,
         temperature: float = 0.8,
         eos_token_id: int | None = None,
+        attention_mask: torch.Tensor | None = None,
+        stop_on_eos: bool = True,
     ) -> torch.Tensor:
         self.eval()
         cache = KVCache()
         generated = input_ids
+        if attention_mask is None:
+            attention_mask = torch.ones_like(input_ids)
         for _ in range(max_new_tokens):
+            # 第一步跑完整 prompt 写入 cache，之后每步只进 1 个 token
             step_ids = generated if cache.get_seq_length() == 0 else generated[:, -1:]
-            logits, _, cache = self(step_ids, cache=cache, use_cache=True)
+            logits, _, cache = self(
+                step_ids, attention_mask=attention_mask, cache=cache, use_cache=True
+            )
             next_logits = logits[:, -1]
             if temperature <= 0:
                 next_tokens = next_logits.argmax(-1, keepdim=True)
             else:
                 next_tokens = torch.multinomial(torch.softmax(next_logits / temperature, dim=-1), 1)
             generated = torch.cat([generated, next_tokens], dim=1)
-            if eos_token_id is not None and (next_tokens == eos_token_id).all():
+            # 新 token 视为有效位，左 pad 的 0 仍从 prompt 的 attention_mask 继承
+            attention_mask = torch.cat(
+                [
+                    attention_mask,
+                    torch.ones(
+                        input_ids.size(0), 1, device=input_ids.device, dtype=attention_mask.dtype
+                    ),
+                ],
+                dim=1,
+            )
+            # GRPO 需要组内等长，stop_on_eos=False 时跑满 max_new_tokens
+            if stop_on_eos and eos_token_id is not None and (next_tokens == eos_token_id).all():
                 break
         return generated
 
